@@ -126,10 +126,10 @@ resize();
 // No image-based environment map, no reflections: building one (PMREM blur shaders) froze slow PCs
 // for seconds at load. A sky / pink-ground hemisphere light gives the soft fill, the sun adds
 // direction and crisp shadows on top, and a little ambient keeps the shade from going dull.
-export const hemi = new T.HemisphereLight(0xeaf2ff, 0xd86a92, 1.9);
-export const ambient = new T.AmbientLight(0xfff0f4, 0.32);
+export const hemi = new T.HemisphereLight(0xeaf2ff, 0xd86a92, 1.1);
+export const ambient = new T.AmbientLight(0xfff0f4, 0.45);
 scene.add(hemi, ambient);
-export const sun = new T.DirectionalLight(0xfff4ea, 2.7);
+export const sun = new T.DirectionalLight(0xfff4ea, 1.5);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
 Object.assign(sun.shadow.camera, { left: -64, right: 64, top: 64, bottom: -64, near: 1, far: 360 });

@@ -468,8 +468,10 @@ class Remote {
             if (s) stepQuiet(s.mat);
         }
         this.stepN = stepN;
-        u.pivot.position.y = PIVOT + (moving ? Math.abs(Math.sin(this.phase)) * 0.16 : 0);
-        this.lean = (this.lean || 0) + ((moving ? 0.13 : fly ? 0.2 : 0) - (this.lean || 0)) * Math.min(1, dt * 8);
+        // a Bloxity avatar bobs and leans by itself (animator.js); this is for the blocky stand-in
+        const own = !this.blox;
+        u.pivot.position.y = PIVOT + (moving && own ? Math.abs(Math.sin(this.phase)) * 0.16 : 0);
+        this.lean = (this.lean || 0) + ((moving && own ? 0.13 : fly ? 0.2 : 0) - (this.lean || 0)) * Math.min(1, dt * 8);
         applyFx(r, p.fx || '', dt);
         u.pivot.rotation.set(this.lean, u.spinA, 0);
         r.scale.setScalar(u.fxScale);
@@ -1139,7 +1141,7 @@ function update(dt) {
         else animRig(u.body, 0, 0);
         if (u.held && !P.climbing) holdPose(u.body);
         if (P.swing > 0) { P.swing -= dt; u.body.userData.arms[1].rotation.set(-1.6 - Math.sin((1 - P.swing / 0.3) * Math.PI) * 0.5, 0, 0); }
-        if (localAvatar) localAvatar.update(dt, { moving: P.moving && P.onGround, air: !P.onGround && !P.climbing, speed: hs, t, pose: P.climbing ? 'climb' : undefined });
+        if (localAvatar) localAvatar.update(dt, { moving: P.moving && P.onGround, air: !P.onGround && !P.climbing, vy: P.climbing ? 0 : P.vel.y, speed: hs, t, pose: P.climbing ? 'climb' : undefined });
         setTool(rig, id); setTrail(rig, S.trail);
         if (u.carpet) { u.carpet.visible = P.flying; waveCarpet(u.carpet, t, P.moving ? 1.4 : 0.8); }
         u.trail.update(trailAt(rig), (P.moving || !P.onGround), dt, t);
@@ -1148,22 +1150,25 @@ function update(dt) {
         if (P.onGround && P.moving && stepN !== P.lastStepN && P.ground) footStep(P.ground);
         if (P.climbing && stepN !== P.lastStepN && P.vel.y > 0) surfStep('truss', false);
         P.lastStepN = stepN;
-        const runBob = P.onGround && P.moving && !P.climbing ? Math.abs(Math.sin(P.animPhase)) * 0.18 : 0;
+        // the Bloxity avatar bobs, leans and lands by itself (animator.js): the whole-body bob, lean,
+        // roll and squash below are for the blocky stand-in only
+        const own = !localAvatar;
+        const runBob = own && P.onGround && P.moving && !P.climbing ? Math.abs(Math.sin(P.animPhase)) * 0.18 : 0;
         u.pivot.position.y = PIVOT + runBob;
-        const leanTo = P.climbing ? 0 : P.flying ? (P.moving ? 0.28 : 0) : P.onGround && P.moving ? Math.min(0.17, ws * 0.007) : !P.onGround ? -0.06 : 0;
+        const leanTo = P.climbing ? 0 : P.flying ? (P.moving ? 0.28 : 0) : !own ? 0 : P.onGround && P.moving ? Math.min(0.17, ws * 0.007) : !P.onGround ? -0.06 : 0;
         P.lean = (P.lean || 0) + (leanTo - (P.lean || 0)) * Math.min(1, dt * 9);
         let turn = P.facing - (P.prevFacing ?? P.facing);
         turn = Math.atan2(Math.sin(turn), Math.cos(turn));
         P.prevFacing = P.facing;
-        const rollTo = clamp(-turn / Math.max(dt, 1e-3) * 0.045, -0.22, 0.22) * (P.moving ? 1 : 0);
+        const rollTo = clamp(-turn / Math.max(dt, 1e-3) * 0.045, -0.22, 0.22) * (P.moving && own ? 1 : 0);
         P.roll = (P.roll || 0) + (rollTo - (P.roll || 0)) * Math.min(1, dt * 7);
         applyFx(rig, S.fx || '', dt);
         u.pivot.rotation.set(P.lean, u.spinA, P.roll);
         P.squashV += (1 - P.squash) * 180 * dt;
         P.squashV *= Math.exp(-12 * dt);
         P.squash = clamp(P.squash + P.squashV * dt, 0.72, 1.28);
-        const sc = u.fxScale;
-        rig.scale.set(sc / Math.sqrt(P.squash), sc * P.squash, sc / Math.sqrt(P.squash));
+        const sc = u.fxScale, sq = own ? P.squash : 1;
+        rig.scale.set(sc / Math.sqrt(sq), sc * sq, sc / Math.sqrt(sq));
         tickShield(rig, dt);
         if (myPets) {
             myPets.set(equippedPetDefs());
@@ -1201,7 +1206,7 @@ function equippedPetDefs() {
 // =====================================================================================
 // Boot
 // =====================================================================================
-let lastFrame = 0, loadingSignaled = false, fpsAcc = 0, fpsFrames = 0, showFps = false;
+let frameErrors = 0, lastFrame = 0, loadingSignaled = false, fpsAcc = 0, fpsFrames = 0, showFps = false;
 // Slow PC? After joining, if the game keeps running under ~40 FPS for 3 s (and the tab is visible),
 // step the graphics down one level (never saved, never below Low). It stops once the player picks one.
 const fpsWatch = { t: 0, low: 0 };
@@ -1223,10 +1228,13 @@ function frame(now) {
     if (fpsAcc >= 0.5) { if (showFps) $('#fps').textContent = Math.round(fpsFrames / fpsAcc) + ' FPS'; watchFps(fpsFrames / fpsAcc); fpsAcc = 0; fpsFrames = 0; }
     lastFrame = now;
     if (!loadingSignaled) { loadingSignaled = true; BX.triggerAllSettings(); }
-    pollGamepad();
-    padButtons();
-    // Nothing is drawn behind the loading screen: the page stays free to load and connect
-    if (running) { update(dt); updateCamera(dt); render(); }
+    // one bad frame (a broken avatar item, say) must never stop the game: log it and keep going
+    try {
+        pollGamepad();
+        padButtons();
+        // Nothing is drawn behind the loading screen: the page stays free to load and connect
+        if (running) { update(dt); updateCamera(dt); render(); }
+    } catch (e) { if (frameErrors++ < 5) console.error('frame error', e); }
     requestAnimationFrame(frame);
 }
 

@@ -13,8 +13,8 @@ let quality = isTouch ? 'low' : 'medium';
 try { quality = localStorage.getItem('stw_quality') || quality; } catch (e) { /* default */ }
 if (!QUALITIES[quality]) quality = 'medium';
 
-// Neutral tone mapping keeps every colour close to its authored sRGB value
-renderer.toneMapping = T.NeutralToneMapping;
+// No tone mapping, like Bloxity's top games: colours go to the screen as lit
+renderer.toneMapping = T.NoToneMapping;
 renderer.toneMappingExposure = 1.0;
 
 // Low drops the shadows and the studs' normal map together, so one background compile covers both
